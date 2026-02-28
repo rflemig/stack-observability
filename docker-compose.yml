@@ -1,6 +1,16 @@
-
-
 services:
+
+  localstack:
+    image: localstack/localstack:latest
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
 
   prometheus:
     image: prom/prometheus:latest
@@ -27,14 +37,6 @@ services:
       - "4318:4318"
     volumes:
       - ./tempo/tempo.yml:/etc/tempo.yml
-
-
-
-
-
-
-
-
 
   promtail:
     image: grafana/promtail:latest

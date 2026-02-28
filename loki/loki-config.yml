@@ -4,12 +4,18 @@ server:
   http_listen_port: 3100
 
 common:
-  path_prefix: /tmp/loki
-  storage:
-    filesystem:
-      chunks_directory: /tmp/loki/chunks
-      rules_directory: /tmp/loki/rules
+  path_prefix: /loki
   replication_factor: 1
+
+  storage:
+    s3:
+      endpoint: http://localstack:4566
+      bucketnames: loki-bucket
+      access_key_id: test
+      secret_access_key: test
+      region: us-east-1
+      s3forcepathstyle: true
+
   ring:
     kvstore:
       store: inmemory
@@ -18,8 +24,21 @@ schema_config:
   configs:
     - from: 2024-01-01
       store: tsdb
-      object_store: filesystem
+      object_store: s3
       schema: v13
       index:
         prefix: index_
         period: 24h
+
+storage_config:
+  aws:
+    s3: s3://test:test@localstack:4566/loki-bucket
+    s3forcepathstyle: true
+    insecure: true
+
+limits_config:
+  allow_structured_metadata: true
+
+ingester:
+  chunk_idle_period: 5s
+  max_chunk_age: 10s
