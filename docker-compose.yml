@@ -1,56 +1,172 @@
+version: "3.8"
+
+x-logging: &default-logging
+  driver: loki
+  options:
+    loki-url: "http://loki:3100/loki/api/v1/push"
+    loki-retries: 3
+    labels: namespace
+    loki-relabel-config: |
+      - action: replace
+        source_labels: ["namespace","compose_service"]
+        separator: "/"
+        target_label: job
+      - action: replace
+        source_labels: ["container_name"]
+        target_label: instance
+
 services:
 
+  # -----------------------------
+  # AWS mock
+  # -----------------------------
   localstack:
     image: localstack/localstack:latest
     environment:
-      - SERVICES=s3
-      - DEBUG=1
-      - AWS_DEFAULT_REGION=us-east-1
+      SERVICES: s3
+      DEBUG: 1
+      AWS_DEFAULT_REGION: us-east-1
     ports:
       - "4566:4566"
     volumes:
       - ./localstack:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      namespace: aws
+    logging: *default-logging
 
+  # -----------------------------
+  # OpenTelemetry Collector
+  # -----------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-config.yml"]
+    volumes:
+      - ./otel/otel-config.yml:/etc/otel-config.yml
+    expose:
+      - "4317"
+      - "4318"
+    depends_on:
+      - tempo
+    labels:
+      namespace: monitoring
+    logging: *default-logging
+
+  # -----------------------------
+  # Aplicação TNS
+  # -----------------------------
+  db:
+    image: grafana/tns-db:latest
+    command: ["-log.level=debug"]
+    ports:
+      - "8000:80"
+    environment:
+      JAEGER_ENDPOINT: http://tempo:14268/api/traces
+      JAEGER_AGENT_HOST: tempo
+      JAEGER_AGENT_PORT: 6831
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: 1
+    depends_on:
+      - tempo
+    labels:
+      namespace: tns
+    logging: *default-logging
+
+  app:
+    image: grafana/tns-app:latest
+    command: ["-log.level=debug", "http://db"]
+    ports:
+      - "8001:80"
+    environment:
+      JAEGER_ENDPOINT: http://tempo:14268/api/traces
+      JAEGER_AGENT_HOST: tempo
+      JAEGER_AGENT_PORT: 6831
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: 1
+    depends_on:
+      - db
+      - tempo
+    labels:
+      namespace: tns
+    logging: *default-logging
+
+  loadgen:
+    image: grafana/tns-loadgen:latest
+    command: ["-log.level=debug", "http://app"]
+    ports:
+      - "8002:80"
+    environment:
+      JAEGER_ENDPOINT: http://tempo:14268/api/traces
+      JAEGER_AGENT_HOST: tempo
+      JAEGER_AGENT_PORT: 6831
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: 1
+    depends_on:
+      - app
+      - tempo
+    labels:
+      namespace: tns
+    logging: *default-logging
+
+  # -----------------------------
+  # Observabilidade
+  # -----------------------------
   prometheus:
     image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1d"
+      - "--log.level=debug"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+    labels:
+      namespace: monitoring
+    logging: *default-logging
 
   loki:
     image: grafana/loki:latest
-    command: -config.file=/etc/loki/loki-config.yml
+    command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml
     ports:
       - "3100:3100"
+    labels:
+      namespace: monitoring
+    logging: *default-logging
 
   tempo:
     image: grafana/tempo:2.5.0
-    command:
-      - -config.file=/etc/tempo.yml
+    command: ["-config.file=/etc/tempo.yml"]
     ports:
       - "3200:3200"
-      - "4317:4317"
-      - "4318:4318"
+      - "14268:14268"
     volumes:
       - ./tempo/tempo.yml:/etc/tempo.yml
+    labels:
+      namespace: monitoring
+    logging: *default-logging
 
   promtail:
     image: grafana/promtail:latest
-    command: -config.file=/etc/promtail/promtail-config.yml
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
     volumes:
       - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-
       - loki
+    labels:
+      namespace: monitoring
+    logging: *default-logging
 
   grafana:
     image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
     ports:
@@ -59,3 +175,6 @@ services:
       - prometheus
       - loki
       - tempo
+    labels:
+      namespace: monitoring
+    logging: *default-logging

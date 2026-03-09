@@ -1,0 +1,18 @@
+target: all
+
+server:
+  http_listen_port: 9009
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor

@@ -3,6 +3,11 @@ server:
 
 distributor:
   receivers:
+    jaeger:
+      protocols:
+        thrift_http:
+        thrift_compact:
+
     otlp:
       protocols:
         grpc:
@@ -12,5 +17,4 @@ storage:
   trace:
     backend: local
     local:
-      path: /tmp/tempo/traces
-
+      path: /tmp/tempo
